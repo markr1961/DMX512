@@ -20,33 +20,43 @@ selects between mode setting and level setting.
 
 */
 
+/* trash to fix */
+#define I2CAddress  0x47
+uint8_t SevenSegmentASCII[] = {0};
+void I2CSend(int, uint8_t *, int);
+/* end trash to fix */
+
 typedef enum
 {
-  DMX_PROG;   //  "Prg"
-  DMX_RED;    //  "rEd"
-  DMV_GREEN;  //  "Grn"
-  DMX_BLUE;   //  "Blu"
-  DMX_INT;    //  "Int"
-  DMX_ALL;    //  "All"
-  DMX_WHEEL;  //  "XXX" runs color wheel
-  DMA_MAX_MODES;
+  DMX_PROG,   //  "Prg"
+  DMX_RED,    //  "rEd"
+  DMX_GREEN,  //  "Grn"
+  DMX_BLUE,   //  "blu"
+  DMX_INT,    //  "Int"
+  DMX_ALL,    //  "All"
+  DMX_WHEEL,  //  "XXX" runs color wheel
+  DMX_MAX_MODE
 } dmx_mode_en;
 
-// characters were chosen based on their uniqueness when mapped to a 7-segment display
-//character to segment map https://www.partsnotincluded.com/segmented-led-display-ascii-library/
+// characters are chosen based on their uniqueness when mapped to a 7-segment display
+// character to segment map https://www.partsnotincluded.com/segmented-led-display-ascii-library/
 // library: https://github.com/dmadison/LED-Segment-ASCII
 char displayStrings[][4] {{"Prg"}, {"rEd"}, {"Grn"}, {"blu"}, {"Int"}, {"All"}, {"XXX"}};
 
 // maps a single segment per index so it 'rolls' around the outside segments.
-roller[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40]; // segments a-g
+uint8_t roller[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40}; // segments a-g
 
 char displayData[4];  // buffer for display data.
 
 dmx_mode_en dmxMode, dmxSelect;
 int dmxAddress, dmxRed, dmxGreen, dmxBlue;
-bool buttonPress, encoderUp, encoderDown;
+bool selectMode, buttonPress, encoderUp, encoderDown;
 
 uint8_t dmxData[512] = {0};     // does not include DMX512 'code' byte!
+uint8_t dmaBuffer[513] = {0};
+
+void sendDigits(char *data);
+void setDisplayData(dmx_mode_en mode);
 
 /*
 ### debounce:
@@ -59,26 +69,51 @@ main loop button handler:
             enable button IRQ
 */
 
+// https://stackoverflow.com/a/20765875/30494907
+dmx_mode_en operator ++(dmx_mode_en &id, int)
+{
+   dmx_mode_en currentID = id;
+
+   if ( DMX_MAX_MODE < id + 1 ) id = DMX_PROG;
+   else id = static_cast<dmx_mode_en>( id + 1 );
+
+   return ( currentID );
+}
+dmx_mode_en operator --(dmx_mode_en &id, int )
+{
+   dmx_mode_en currentID = id;
+
+   if ( DMX_PROG < id - 1 ) id = DMX_MAX_MODE;
+   else id = static_cast<dmx_mode_en>( id - 1 );
+
+   return ( currentID );
+}
+
 ///
 // @brief copy the rolling segment data to the display buffer
 //
 void displayRoller(void)
 {
   static int segment = 0;
+  static unsigned long lastMillis = 0;
 
-  if (segment) >= sizeof(roller)
-    segment = 0;
+  // update the roller at 5 Hz
+  if (lastMillis + 200 < millis())
+  {
+    lastMillis = millis();
 
-  memset (displayData, roller[segment], sizeof(buffer));
+    memset(displayData, roller[segment], sizeof(displayData));
 
-  segment++;  // update for next time.
-
+    // update for next time.
+    if (++segment >= sizeof(roller))
+      segment = 0;
+  }
 }
 
 ///
 // @brief during select, this function displays and sends the mode string
 //
-void displayMode(mode)
+void displayMode(dmx_mode_en mode)
 {
   char buffer[4];
 
@@ -89,19 +124,22 @@ void displayMode(mode)
 
 }
 
+///
+// @brief copies DMX values to DMA buffer and starts DMA.
+// for now this function outputs the 513 bytes to serial.
+//
 void startDmx(void)
 {
-  uint8_t dmaBuffer[513] = {0};
-  char buffer[24];
+  char buffer[12];
 
   memcpy(&dmaBuffer[1], dmxData, sizeof(dmxData));
 
-  sprintf(buffer, "code = %d", dmaBuffer[0]);
+  sprintf(buffer, "code = %3d", dmaBuffer[0]);
   Serial.println(buffer);
 
   for (int x = 1; x < sizeof(dmaBuffer); x++)
   {
-    Serial.print(damBuffer[x]);
+    Serial.print(dmaBuffer[x]);
     if (x < sizeof(dmaBuffer)-1)
       Serial.print(", ");
   }
@@ -109,14 +147,42 @@ void startDmx(void)
 
 }
 
+///
+// @brief updates the colors based on a color wheel process.
+// @note wheel function from  https://github.com/carl3721/stm32-dmx512
+//
 void colorWheel(void)
 {
-  // need code here.....
+  static int wheel= 0;
+  static unsigned long lastMillis = 0;
+
+  // update the color wheel at 12.5 Hz
+  if (lastMillis + 80 < millis())
+  {
+    lastMillis = millis();
+    // calculate color wheel colors
+    if (wheel <= 255) {
+        dmxRed = wheel;
+        dmxGreen = 0;
+        dmxBlue = 255 - wheel;
+    } else if (255 < wheel && wheel <= 511) {
+        dmxRed = 255 - (wheel - 256);
+        dmxGreen = wheel - 256;
+        dmxBlue = 0;
+    } else if (511 < wheel && wheel <= 767) {
+        dmxRed = 0;
+        dmxGreen = 255 - (wheel - 512);
+        dmxBlue = wheel - 512;
+    }
+    wheel++;
+    wheel %= 768;
+  }
 }
 
 void setup(void)
 {
   Serial.begin(115200);
+
   // initialize digital pin LED_BUILTIN as an output.
   pinMode(LED_BUILTIN, OUTPUT);
 
@@ -129,10 +195,11 @@ void setup(void)
 
 }
 
-void main(void)
+void loop(void)
+//int main(void)
 {
 
-  while(1)
+  //while(1)
   {
     if (buttonPress)
     {
@@ -142,20 +209,20 @@ void main(void)
 
     if (selectMode)
     {
-      if (encoder_up)
+      if (encoderUp)
       {
         dmxMode++;
-        if (dmxMode == DMA_MAX_MODES) // rollover
-          dmaMode = DMX_PROG;
-        encoder_up = false;
+        if (dmxMode == DMX_MAX_MODE) // rollover
+          dmxMode = DMX_PROG;
+        encoderUp = false;
       }
-      else if (encoder_down)
+      else if (encoderDown)
       {
         if (dmxMode == DMX_PROG) // bottom
-          dmxMode = DMX_MAX_MODE - 1; // wrap around
+          dmxMode = DMX_WHEEL; // wrap around
         else
           dmxMode--;
-        encoder_up = false;
+        encoderUp = false;
       }
 
       displayMode(dmxMode);
@@ -167,15 +234,15 @@ void main(void)
       switch (dmxMode)
       {
       case DMX_PROG:   // program DMA address
-        if (encoder_up)
+        if (encoderUp)
         {
-          dmx_addres++;
-          encoder_up = false;
+          dmxAddress++;
+          encoderUp = false;
         }
-        else if (encoder_down)
+        else if (encoderDown)
         {
-          dmx_addres--;
-          encoder_down = false;
+          dmxAddress--;
+          encoderDown = false;
         }
         // bounds check address
         if (dmxAddress > 512)
@@ -185,64 +252,64 @@ void main(void)
         break;
 
       case DMX_RED:
-        if (encoder_up)
+        if (encoderUp)
         {
-          dmx_red++;
-          encoder_up = false;
+          dmxRed++;
+          encoderUp = false;
         }
-        else if (encoder_down)
+        else if (encoderDown)
         {
-          dmx_red--;
-          encoder_down = false;
+          dmxRed--;
+          encoderDown = false;
         }
         break;
 
-      case DMV_GREEN:
-        if (encoder_up)
+      case DMX_GREEN:
+        if (encoderUp)
         {
-          dmx_green++;
-          encoder_up = false;
+          dmxGreen++;
+          encoderUp = false;
         }
-        else if (encoder_down)
+        else if (encoderDown)
         {
-          dmx_green--;
-          encoder_down = false;
+          dmxGreen--;
+          encoderDown = false;
         }
         break;
 
       case DMX_BLUE:
-        if (encoder_up)
+        if (encoderUp)
         {
-          dmx_blue++;
-          encoder_up = false;
+          dmxBlue++;
+          encoderUp = false;
         }
-        else if (encoder_down)
+        else if (encoderDown)
         {
-          dmx_blue--;
-          encoder_down = false;
+          dmxBlue--;
+          encoderDown = false;
         }
         break;
 
       case DMX_INT:
       case DMX_ALL:
-        if (encoder_up)
+        if (encoderUp)
         {
-          dmx_red++;
-          dmx_green++;
-          dmx_blue++;
-          encoder_up = false;
+          dmxRed++;
+          dmxGreen++;
+          dmxBlue++;
+          encoderUp = false;
         }
-        else if (encoder_down)
+        else if (encoderDown)
         {
-          dmx_red--;
-          dmx_green--;
-          dmx_blue--;
-          encoder_down = false;
+          dmxRed--;
+          dmxGreen--;
+          dmxBlue--;
+          encoderDown = false;
         }
         break;
 
       case DMX_WHEEL:
-        colorWheel(dmxAddress); // populates dmxData[];
+        colorWheel();
         break;
       } // switch (dmxMode)
 
@@ -291,20 +358,20 @@ void loadDmxData(dmx_mode_en mode, int address, int red, int green, int blue)
     break;
 
   case DMX_RED:
-    dmaData[address] = red;
+    dmxData[address] = red;
     break;
 
-  case DMV_GREEN:
-    dmaData[address] = green;
+  case DMX_GREEN:
+    dmxData[address] = green;
     break;
 
   case DMX_BLUE:
-    dmaData[address] = blue;
+    dmxData[address] = blue;
     break;
 
   case DMX_INT: // intensity
     temp = (red + green + blue) / 3;
-    dmaData[address] = temp;
+    dmxData[address] = temp;
     break;
 
   case DMX_ALL: //
@@ -331,9 +398,10 @@ void setDisplayData(dmx_mode_en mode)
 {
   static bool toggle = false;
   char buffer[6];
+  int temp;
 
   // display the first char of the mode in the first digit
-  display[0] = displayStrings[mode][0];
+  displayData[0] = displayStrings[mode][0];
 
   switch (mode)
   {
@@ -346,7 +414,7 @@ void setDisplayData(dmx_mode_en mode)
     sprintf(buffer, "%3d", dmxRed);
     break;
 
-  case DMV_GREEN:
+  case DMX_GREEN:
     sprintf(buffer, "%3d", dmxGreen);
     break;
 
@@ -356,7 +424,7 @@ void setDisplayData(dmx_mode_en mode)
 
   case DMX_INT:
   case DMX_ALL:
-    int temp = (dmxRed + dmxGreen + dmxBlue) / 3;
+    temp = (dmxRed + dmxGreen + dmxBlue) / 3;
     sprintf(buffer, "%3d", temp);
     break;
 
@@ -370,11 +438,11 @@ void setDisplayData(dmx_mode_en mode)
 
   default:  // ooops
     if (toggle) {
-        memset(displayData, '\"', sizeof(displayData));
-        memset(buffer, '\"', sizeof(buffer));
+      displayData[0] = '\"';
+      memset(buffer, '\"', sizeof(buffer));
     }
     else {
-      memset(&displayData, 'w', sizeof(displayData));
+      displayData[0] = 'w';
       memset(buffer, 'w', sizeof(buffer));
     }
     toggle = !toggle;
@@ -382,10 +450,10 @@ void setDisplayData(dmx_mode_en mode)
 
   } // switch (dmxMode)
 
-  // for all modes other than the color wheel, copy the 3 digit value
+  // for modes other than the color wheel, copy the 3 digit value
   if (dmxMode != DMX_WHEEL)
   {
-    memcpy(&display[1], buffer, 3);
+    memcpy(&displayData[1], buffer, 3);
   }
 
   // now display the data:
@@ -397,11 +465,11 @@ void setDisplayData(dmx_mode_en mode)
 //
 void sendDigits(char *data)
 {
-  int tempBuffer[4];
+  uint8_t tempBuffer[4];
   // look up 7-segment pattern per digit
   for (int x = 0; x < sizeof(data); x++)
   {
-    tempBuffer[i] = SevenSegmentASCII[data[i]];
+    tempBuffer[x] = SevenSegmentASCII[data[x]];
   }
 
   // send buffer to I2C:
