@@ -18,7 +18,39 @@ and showing 1 digit mode and 3 digits 0-255 value.
 #### button function
 selects between mode setting and level setting.
 
+Requires Matthias Hertel's libraries for
+rotary encoder: https://github.com/mathertel/RotaryEncoder
+one button: https://github.com/mathertel/OneButton
+state of the rotary encoder is checked in the loop() function.
+A double tap on the switch toggles the built-in LED.
+
 */
+
+#include <Arduino.h>
+#include <RotaryEncoder.h>
+#include <OneButton.h>
+
+// Hardware setup:
+// Attach rotary encoder output pins to:
+// * D2 and D3 for encoder 
+// * D4 for switch 
+#define EN_PIN_IN1 2
+#define EN_PIN_IN2 3
+#define SWITCH_IN  4
+
+// Setup a RotaryEncoder with 4 steps per latch for the 2 signal input pins:
+// RotaryEncoder encoder(EN_PIN_IN1, EN_PIN_IN2, RotaryEncoder::LatchMode::FOUR3);
+// Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
+RotaryEncoder encoder(EN_PIN_IN1, EN_PIN_IN2, RotaryEncoder::LatchMode::TWO03);
+
+OneButton button(SWITCH_IN); // Setup a new OneButton on pin A1.  
+
+
+inline void toggle(int pin)
+{
+   digitalWrite(pin, digitalRead(pin) ? false : true);
+}
+
 
 /* trash to fix */
 #define I2CAddress  0x47
@@ -57,17 +89,6 @@ uint8_t dmaBuffer[513] = {0};
 
 void sendDigits(char *data);
 void setDisplayData(dmx_mode_en mode);
-
-/*
-### debounce:
-IRQ falling: clear & disable IRQ, set counter = 50mS.
-main loop button handler:
-    if counter,
-        counter --;
-        if counter = 0 && button low
-            set button press flag
-            enable button IRQ
-*/
 
 // https://stackoverflow.com/a/20765875/30494907
 dmx_mode_en operator ++(dmx_mode_en &id, int)
@@ -186,27 +207,26 @@ void setup(void)
   // initialize digital pin LED_BUILTIN as an output.
   pinMode(LED_BUILTIN, OUTPUT);
 
-  while (!Serial)
-  {
-    ;  // wait for serial port to connect. Needed for native USB port only
-  }
+  // link the double-click function to be called on a double-click event.
+  button.attachDoubleClick(doubleclick);
+  button.attachClick(toggleSelect);
 
-  digitalWrite(LED_BUILTIN, HIGH); // turn on LED
+  while (!Serial)
+    ;  // wait for serial port to connect. Needed for native USB port only
+
+  Serial.println("ready");
 
 }
 
-void loop(void)
-//int main(void)
+void loop(void)     //int main(void)
 {
+
+  encoder.tick();
+  button.tick(); // watch the push button:
+  checkForEncChange();
 
   //while(1)
   {
-    if (buttonPress)
-    {
-      selectMode = ! selectMode;
-      buttonPress = false;
-    }
-
     if (selectMode)
     {
       if (encoderUp)
@@ -226,11 +246,9 @@ void loop(void)
       }
 
       displayMode(dmxMode);
-
     }
     else// run mode:
     {
-
       switch (dmxMode)
       {
       case DMX_PROG:   // program DMA address
@@ -475,3 +493,34 @@ void sendDigits(char *data)
   // send buffer to I2C:
   I2CSend(I2CAddress, tempBuffer, sizeof(tempBuffer));
 }
+
+bool checkForEncChange(void)
+{
+  static int lastPos = 0;
+  int newPos = encoder.getPosition();
+  if (lastPos != newPos) {
+    Serial.print("pos:");
+    Serial.print(newPos);
+    Serial.print(" dir:");
+    bool dir = encoder.getDirection()
+    Serial.println((int)dir);
+    if (dir)
+        encoderUp = true;
+    else
+        encoderDown = true;
+    lastPos = newPos;
+    return(true);
+  }
+  return(false);
+}
+
+void toggleSelect(void)
+{
+  selectMode = ! selectMode;
+}
+
+// called when the button was pressed twice in a short time interval.
+void doubleclick()
+{
+  toggle(LED_BUILTIN);
+} 
