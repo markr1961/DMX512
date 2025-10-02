@@ -1,5 +1,6 @@
 /*
 ## DMX512 Project
+copyRight (c) 2025 Mark A. Rosenau
 
 ### 4 digit display
 Display toggles between being used to select the operating mode,
@@ -30,6 +31,18 @@ A double tap on the switch toggles the built-in LED.
 #include <RotaryEncoder.h>
 #include <OneButton.h>
 
+typedef enum DmaModeEnum
+{
+  DMX_PROG,   //  "Prg"
+  DMX_RED,    //  "rEd"
+  DMX_GREEN,  //  "Grn"
+  DMX_BLUE,   //  "blu"
+  DMX_INT,    //  "Int"
+  DMX_ALL,    //  "All"
+  DMX_WHEEL,  //  "XXX" runs color wheel
+  DMX_MAX_MODE
+} dmx_mode_en;
+
 // Hardware setup:
 // Attach rotary encoder output pins to:
 // * D2 and D3 for encoder 
@@ -45,7 +58,6 @@ RotaryEncoder encoder(EN_PIN_IN1, EN_PIN_IN2, RotaryEncoder::LatchMode::TWO03);
 
 OneButton button(SWITCH_IN); // Setup a new OneButton on pin A1.  
 
-
 inline void toggle(int pin)
 {
    digitalWrite(pin, digitalRead(pin) ? false : true);
@@ -55,20 +67,23 @@ inline void toggle(int pin)
 /* trash to fix */
 #define I2CAddress  0x47
 uint8_t SevenSegmentASCII[] = {0};
-void I2CSend(int, uint8_t *, int);
-/* end trash to fix */
-
-typedef enum
+void I2CSend(int address, uint8_t *data, int size)
 {
-  DMX_PROG,   //  "Prg"
-  DMX_RED,    //  "rEd"
-  DMX_GREEN,  //  "Grn"
-  DMX_BLUE,   //  "blu"
-  DMX_INT,    //  "Int"
-  DMX_ALL,    //  "All"
-  DMX_WHEEL,  //  "XXX" runs color wheel
-  DMX_MAX_MODE
-} dmx_mode_en;
+  // Serial.print("address: ");
+  // Serial.print(address, HEX);
+  // Serial.print(", data: ");
+  // for(int x; x < size; x++)
+  // {
+  // Serial.print("0x");
+  // Serial.print(data[x], HEX);
+  // Serial.print(", ");
+  // }
+  // Serial.print("size: ");
+  // Serial.print(size);
+  // Serial.println(".");
+
+};
+/* end trash to fix */
 
 // characters are chosen based on their uniqueness when mapped to a 7-segment display
 // character to segment map https://www.partsnotincluded.com/segmented-led-display-ascii-library/
@@ -155,16 +170,16 @@ void startDmx(void)
 
   memcpy(&dmaBuffer[1], dmxData, sizeof(dmxData));
 
-  sprintf(buffer, "code = %3d", dmaBuffer[0]);
-  Serial.println(buffer);
+  // sprintf(buffer, "code = %3d", dmaBuffer[0]);
+  // Serial.println(buffer);
 
-  for (int x = 1; x < sizeof(dmaBuffer); x++)
-  {
-    Serial.print(dmaBuffer[x]);
-    if (x < sizeof(dmaBuffer)-1)
-      Serial.print(", ");
-  }
-  Serial.println(".");
+  // for (int x = 1; x < sizeof(dmaBuffer); x++)
+  // {
+  //   Serial.print(dmaBuffer[x]);
+  //   if (x < sizeof(dmaBuffer)-1)
+  //     Serial.print(", ");
+  // }
+  // Serial.println(".");
 
 }
 
@@ -358,8 +373,8 @@ void loop(void)     //int main(void)
   // send DMX data
   startDmx();
 
-  // wait for 100mS
-  delay(100);
+  // loop time needs to be <10mS for encoder to work
+  delay(10);
 }
 
 ///
@@ -502,12 +517,22 @@ bool checkForEncChange(void)
     Serial.print("pos:");
     Serial.print(newPos);
     Serial.print(" dir:");
-    bool dir = encoder.getDirection()
+    RotaryEncoder::Direction dir = encoder.getDirection();
     Serial.println((int)dir);
-    if (dir)
+    switch (dir)
+    {
+      case RotaryEncoder::Direction::CLOCKWISE:
         encoderUp = true;
-    else
+        break;
+      case RotaryEncoder::Direction::COUNTERCLOCKWISE:
         encoderDown = true;
+      break;
+      case RotaryEncoder::Direction::NOROTATION:
+      default:
+        encoderUp = false;
+        encoderDown = false;
+      break;
+    }
     lastPos = newPos;
     return(true);
   }
@@ -517,10 +542,12 @@ bool checkForEncChange(void)
 void toggleSelect(void)
 {
   selectMode = ! selectMode;
+  Serial.println("short");
 }
 
 // called when the button was pressed twice in a short time interval.
 void doubleclick()
 {
+  Serial.println("double");
   toggle(LED_BUILTIN);
 } 
