@@ -1,6 +1,6 @@
 /*
 ## DMX512 Project
-copyRight (c) 2025 Mark A. Rosenau
+Copyright (c) 2025 Mark A. Rosenau
 
 ### 4 digit display
 Display toggles between being used to select the operating mode,
@@ -19,11 +19,17 @@ and showing 1 digit mode and 3 digits 0-255 value.
 #### button function
 selects between mode setting and level setting.
 
-Requires Matthias Hertel's libraries for
+### Libraries
+Matthias Hertel's libraries for
 rotary encoder: https://github.com/mathertel/RotaryEncoder
 one button: https://github.com/mathertel/OneButton
 state of the rotary encoder is checked in the loop() function.
 A double tap on the switch toggles the built-in LED.
+
+Conceptinetics DMX library
+Copyright (c) 2013 W.A. van der Meeren <danny@illogic.nl>.  All right reserved.
+Licensed under the terms of the GNU Lesser General Public License as
+published by the Free Software Foundation, version 3 of the License.
 
 */
 
@@ -43,20 +49,21 @@ typedef enum DmaModeEnum
   DMX_MAX_MODE
 } dmx_mode_en;
 
-// Hardware setup:
-// Attach rotary encoder output pins to:
-// * D2 and D3 for encoder 
-// * D4 for switch 
-#define EN_PIN_IN1 2
-#define EN_PIN_IN2 3
-#define SWITCH_IN  4
+//#include "Conceptinetics.h"
+
+// Attach rotary encoder output pins:
+// * D3 and D4 for encoder
+// * D5 for switch
+#define EN_PIN_IN1 3
+#define EN_PIN_IN2 4
+#define SWITCH_IN  5
 
 // Setup a RotaryEncoder with 4 steps per latch for the 2 signal input pins:
 // RotaryEncoder encoder(EN_PIN_IN1, EN_PIN_IN2, RotaryEncoder::LatchMode::FOUR3);
 // Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
 RotaryEncoder encoder(EN_PIN_IN1, EN_PIN_IN2, RotaryEncoder::LatchMode::TWO03);
 
-OneButton button(SWITCH_IN); // Setup a new OneButton on pin A1.  
+OneButton button(SWITCH_IN); // Setup a new OneButton on pin A1.
 
 inline void toggle(int pin)
 {
@@ -223,8 +230,8 @@ void setup(void)
   pinMode(LED_BUILTIN, OUTPUT);
 
   // link the double-click function to be called on a double-click event.
-  button.attachDoubleClick(doubleclick);
-  button.attachClick(toggleSelect);
+  button.attachDoubleClick(doubleClick);
+  button.attachClick(singleClick);
 
   while (!Serial)
     ;  // wait for serial port to connect. Needed for native USB port only
@@ -514,7 +521,7 @@ bool checkForEncChange(void)
   static int lastPos = 0;
   int newPos = encoder.getPosition();
   if (lastPos != newPos) {
-    Serial.print("pos:");
+    Serial.print("pos: ");
     Serial.print(newPos);
     Serial.print(" dir:");
     RotaryEncoder::Direction dir = encoder.getDirection();
@@ -523,9 +530,11 @@ bool checkForEncChange(void)
     {
       case RotaryEncoder::Direction::CLOCKWISE:
         encoderUp = true;
+        encoderDown = false;
         break;
       case RotaryEncoder::Direction::COUNTERCLOCKWISE:
         encoderDown = true;
+        encoderUp = false;
       break;
       case RotaryEncoder::Direction::NOROTATION:
       default:
@@ -539,15 +548,15 @@ bool checkForEncChange(void)
   return(false);
 }
 
-void toggleSelect(void)
+void singleClick(void)
 {
   selectMode = ! selectMode;
   Serial.println("short");
 }
 
 // called when the button was pressed twice in a short time interval.
-void doubleclick()
+void doubleClick()
 {
   Serial.println("double");
   toggle(LED_BUILTIN);
-} 
+}
